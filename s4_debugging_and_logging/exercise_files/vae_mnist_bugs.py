@@ -54,7 +54,7 @@ class Encoder(nn.Module):
         epsilon = torch.randn(*var.shape)
         
         z = mean + var*epsilon
-        
+
         return z
     
 class Decoder(nn.Module):
