@@ -54,4 +54,26 @@ Project Organization
 
 --------
 
+Execution scripts
+------------
+```make data <raw_data_dir> <processed_data_dir>``` <br>
+Script for preparing the raw data for the training scripts. It finds all the .npz files in the raw data directory and
+converts it into a Pytorch Tensor format. The tensors are stored in the processed data directory.
+
+```make train <processed_data_dir>``` <br>
+Train a neural network on the provided processed data. The trained network is store in the models directory.
+
+```make predict <model_pt> <external_data_npy>``` <br>
+Train a neural network on the provided external data. This should be a numpy representation of the MNIST dataset.
+
+```make visualize <model_pt> <processed_data_dir> <image_ix_to_project> <projection_layer> <tsne_sample_limit>``` <br>
+Makes three visualisations:
+- Feature map: A single image (selected using `image_ix_to_project` as index on MNIST dataset) projected on a single
+convolutional layer (on the specified `projection_layer`)
+- 2d t-SNE representation of the data on one of the convolutional layers (~`projection_layer`). `tsne_sample_limit`
+should be specified since it's an heavy operations. The limit sets the number of samples that should be used for the
+calculation.
+- Filters: a representation of the filters of the given convolutional layer (~`projection_layer`)
+
+
 <p><small>Project based on the <a target="_blank" href="https://drivendata.github.io/cookiecutter-data-science/">cookiecutter data science project template</a>. #cookiecutterdatascience</small></p>

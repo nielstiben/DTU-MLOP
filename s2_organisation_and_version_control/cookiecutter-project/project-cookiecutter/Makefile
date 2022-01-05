@@ -38,12 +38,13 @@ predict: requirements
 	$(PYTHON_INTERPRETER) src/models/predict_model.py models/trained_model.pt data/external/example_images.npy
 
 ## Visualize Model
-visualize:
+visualize: requirements
 	$(PYTHON_INTERPRETER) src/visualization/visualize.py \
 	models/trained_model.pt \
 	data/processed \
 	0 \
-	conv2
+	conv1 \
+	5000
 
 ## Delete all compiled Python files
 clean:
