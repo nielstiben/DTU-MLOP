@@ -1,0 +1,8 @@
+#default.yaml
+input_filepath: 'data/processed'
+output_filepath: 'models'
+hyperparameters:
+  epochs: 5
+  batch_size: 64
+  lr: 0.01
+  kernel_size: 5

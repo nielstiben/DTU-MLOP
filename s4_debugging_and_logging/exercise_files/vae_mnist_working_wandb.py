@@ -10,30 +10,29 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 from torchvision.utils import save_image
-import cProfile
-import snakeviz
 import torch
-import torchvision.models as models
-from torch.profiler import (
-    profile,
-    record_function,
-    ProfilerActivity,
-    tensorboard_trace_handler,
+import wandb
+from torch.optim import Adam
+import argparse
+
+hyperparameter_defaults = dict(
+    batch_size = 100,
+    epochs = 5,
 )
 
-
 def main():
-
     # Model Hyperparameters
     dataset_path = "datasets"
     cuda = torch.cuda.is_available()
     DEVICE = torch.device("cuda" if cuda else "cpu")
-    batch_size = 100
     x_dim = 784
     hidden_dim = 400
     latent_dim = 20
     lr = 1e-3
-    epochs = 1
+
+    wandb.init(config=hyperparameter_defaults)
+    config = wandb.config
+
     # Data loading
     mnist_transform = transforms.Compose([transforms.ToTensor()])
     train_dataset = MNIST(
@@ -43,9 +42,9 @@ def main():
         dataset_path, transform=mnist_transform, train=False, download=True
     )
     train_loader = DataLoader(
-        dataset=train_dataset, batch_size=batch_size, shuffle=True
+        dataset=train_dataset, batch_size=config.batch_size, shuffle=True
     )
-    test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=config.batch_size, shuffle=False)
 
     class Encoder(nn.Module):
         def __init__(self, input_dim, hidden_dim, latent_dim):
@@ -90,17 +89,14 @@ def main():
             self.Decoder = Decoder
 
         def forward(self, x):
-            with record_function("forward pass ENCODER"):
-                z, mean, log_var = self.Encoder(x)
-            with record_function("forward pass DECODER"):
-                x_hat = self.Decoder(z)
+            z, mean, log_var = self.Encoder(x)
+            x_hat = self.Decoder(z)
             return x_hat, mean, log_var
 
     encoder = Encoder(input_dim=x_dim, hidden_dim=hidden_dim, latent_dim=latent_dim)
     decoder = Decoder(latent_dim=latent_dim, hidden_dim=hidden_dim, output_dim=x_dim)
     model = Model(Encoder=encoder, Decoder=decoder).to(DEVICE)
-    from torch.optim import Adam
-
+    wandb.watch(model, log_freq=100)
     BCE_loss = nn.BCELoss()
 
     def loss_function(x, x_hat, mean, log_var):
@@ -114,48 +110,61 @@ def main():
     optimizer = Adam(model.parameters(), lr=lr)
     print("Start training VAE...")
     model.train()
-    for epoch in range(epochs):
+    for epoch in range(config.epochs):
         overall_loss = 0
         for batch_idx, (x, _) in enumerate(train_loader):
-            with profile(activities=[ProfilerActivity.CPU],record_shapes=True,profile_memory=True) as prof:
-                x = x.view(batch_size, x_dim)
-                x = x.to(DEVICE)
-                optimizer.zero_grad()
-                with record_function("forward pass"):
-                    x_hat, mean, log_var = model(x)
-                loss = loss_function(x, x_hat, mean, log_var)
-                overall_loss += loss.item()
-                with record_function("backward pass"):
-                    loss.backward()
-                optimizer.step()
-        print(
-            "\tEpoch",
-            epoch + 1,
-            "complete!",
-            "\tAverage Loss: ",
-            overall_loss / (batch_idx * batch_size),
-        )
+            x = x.view(config.batch_size, x_dim)
+            x = x.to(DEVICE)
+            optimizer.zero_grad()
+            x_hat, mean, log_var = model(x)
+            loss = loss_function(x, x_hat, mean, log_var)
+            overall_loss += loss.item()
+            loss.backward()
+            optimizer.step()
+
+            if batch_idx % 20 == 0: # report every 20 batches:
+                wandb.log({"Loss": loss})
+                model.eval()
+                with torch.no_grad():
+                    for batch_idx, (x, _) in enumerate(test_loader):
+                        x = x.view(config.batch_size, x_dim)
+                        x = x.to(DEVICE)
+                        x_encoded,_,_ = encoder(x)
+                        x_encoded_decoded = decoder(x_encoded) # Same as x_hat
+                        noise = torch.randn(config.batch_size, latent_dim).to(DEVICE)
+                        x_noise_decoded = decoder(noise)
+                        break
+                # Original
+                wandb.log({'Original Images': wandb.Image(x.view(config.batch_size, 1, 28, 28))})
+                # Encoded -> Decoded (x_hat)
+                wandb.log({'Reconstructed Images (first Encoded, then Decoded)': wandb.Image(x_encoded_decoded.view(config.batch_size, 1, 28, 28))})
+                # Decoded from random noice
+                wandb.log({'Generated Images (random noise trough Decoder)': wandb.Image(x_noise_decoded.view(config.batch_size, 1, 28, 28))})
+                model.train()
+        else:
+            print("\tEpoch",epoch + 1,"complete!","\tAverage Loss: ",overall_loss / (batch_idx * config.batch_size))
+            wandb.log({"Average Loss over epochs": overall_loss / (batch_idx * config.batch_size)})
+
+
     print("Finish!!")
     # Generate reconstructions
     model.eval()
     with torch.no_grad():
         for batch_idx, (x, _) in enumerate(test_loader):
-            x = x.view(batch_size, x_dim)
+            x = x.view(config.batch_size, x_dim)
             x = x.to(DEVICE)
             x_hat, _, _ = model(x)
             break
-    save_image(x.view(batch_size, 1, 28, 28), "orig_data.png")
-    save_image(x_hat.view(batch_size, 1, 28, 28), "reconstructions.png")
+    save_image(x.view(config.batch_size, 1, 28, 28), "orig_data.png")
+    # wandb.log({'Original Images': wandb.Image(x.view(config.batch_size, 1, 28, 28))})
+    save_image(x_hat.view(config.batch_size, 1, 28, 28), "reconstructions.png")
+    # wandb.log({'Reconstructed Images': wandb.Image(x_hat.view(config.batch_size, 1, 28, 28))})
     # Generate samples
     with torch.no_grad():
-        noise = torch.randn(batch_size, latent_dim).to(DEVICE)
+        noise = torch.randn(config.batch_size, latent_dim).to(DEVICE)
         generated_images = decoder(noise)
-    save_image(generated_images.view(batch_size, 1, 28, 28), "generated_sample.png")
-
-    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
-
+    save_image(generated_images.view(config.batch_size, 1, 28, 28), "generated_sample.png")
+    wandb.log({'Generated Images': wandb.Image(generated_images.view(config.batch_size, 1, 28, 28))})
 
 if __name__ == "__main__":
-    # report = cProfile.run('main()', sort='cumtime')
-    # print(report)
     main()
