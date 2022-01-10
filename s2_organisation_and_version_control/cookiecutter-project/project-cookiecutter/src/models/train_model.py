@@ -25,7 +25,6 @@ def main(input_filepath, output_filepath):
     train_y = get_data('train_y.pt')
     train = []
     [train.append((single_train_X, train_y[ix])) for ix, single_train_X in enumerate(train_X)]
-
     trainloader = torch.utils.data.DataLoader(train, batch_size=64, shuffle=True)
 
     criterion = nn.NLLLoss()
